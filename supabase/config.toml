@@ -1,0 +1,10 @@
+project_id = "pjngjdarxyjejehswbkx"
+
+[functions.extract-actions]
+verify_jwt = false
+
+[functions.transcribe-audio]
+verify_jwt = false
+
+[functions.push-to-jira]
+verify_jwt = false
