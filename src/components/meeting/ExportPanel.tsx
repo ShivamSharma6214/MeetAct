@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -7,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
-import { Download, Send, FileJson, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Download, Send, FileJson, FileSpreadsheet, Loader2, Settings } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface ActionItem {
@@ -109,6 +110,32 @@ export function ExportPanel({ actionItems, selectedItems, meetingTitle }: Export
 
       if (error) throw error;
 
+      if (data?.error) {
+        // Check if it's a "not connected" error
+        if (data.error === "Jira integration not found") {
+          toast({
+            variant: 'destructive',
+            title: 'Jira not connected',
+            description: (
+              <div className="flex flex-col gap-2">
+                <span>{data.message}</span>
+                <Link to="/settings" className="text-primary underline flex items-center gap-1">
+                  <Settings className="h-3 w-3" />
+                  Go to Settings
+                </Link>
+              </div>
+            ),
+          });
+        } else {
+          toast({
+            variant: 'destructive',
+            title: 'Jira push failed',
+            description: data.message || data.error,
+          });
+        }
+        return;
+      }
+
       toast({
         title: 'Pushed to Jira!',
         description: `${data.created?.length || 0} issues created in Jira.`,
@@ -118,7 +145,12 @@ export function ExportPanel({ actionItems, selectedItems, meetingTitle }: Export
       toast({
         variant: 'destructive',
         title: 'Jira push failed',
-        description: 'Make sure your Jira integration is connected in settings.',
+        description: 'Please connect your Jira account in Settings.',
+        action: (
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/settings">Settings</Link>
+          </Button>
+        ),
       });
     } finally {
       setIsPushingToJira(false);

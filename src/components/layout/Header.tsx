@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
-import { Moon, Sun, LogOut, Zap } from 'lucide-react';
+import { Moon, Sun, LogOut, Zap, Settings } from 'lucide-react';
 
 export function Header() {
   const { user, signOut } = useAuth();
@@ -36,6 +36,11 @@ export function Header() {
             <>
               <Button variant="ghost" asChild>
                 <Link to="/dashboard">Dashboard</Link>
+              </Button>
+              <Button variant="ghost" size="icon" asChild>
+                <Link to="/settings" aria-label="Settings">
+                  <Settings className="h-5 w-5" />
+                </Link>
               </Button>
               <Button variant="outline" onClick={signOut}>
                 <LogOut className="mr-2 h-4 w-4" />

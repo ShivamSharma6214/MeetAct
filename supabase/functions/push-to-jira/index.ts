@@ -57,33 +57,40 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: "Jira integration not found",
-          message: "Please connect your Jira account in settings first." 
+          message: "Please connect your Jira account in Settings first." 
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Check if token is expired and needs refresh
-    if (integration.expires_at && new Date(integration.expires_at) < new Date()) {
-      // Token expired - in production, implement refresh flow
+    // Parse stored credentials
+    let credentials;
+    try {
+      credentials = JSON.parse(integration.access_token || "{}");
+    } catch {
       return new Response(
         JSON.stringify({ 
-          error: "Jira token expired",
-          message: "Please reconnect your Jira account." 
+          error: "Invalid Jira configuration",
+          message: "Please reconnect your Jira account in Settings." 
         }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const accessToken = integration.access_token;
-    const cloudId = integration.cloud_id;
-
-    if (!accessToken || !cloudId) {
-      return new Response(
-        JSON.stringify({ error: "Invalid Jira integration configuration" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const { domain, email, apiToken, projectKey } = credentials;
+
+    if (!domain || !email || !apiToken || !projectKey) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Incomplete Jira configuration",
+          message: "Please update your Jira settings with all required fields." 
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const auth = btoa(`${email}:${apiToken}`);
+    const jiraBaseUrl = `https://${domain}.atlassian.net`;
 
     // Create issues in Jira
     const createdIssues: Array<{ id: string; key: string; summary: string }> = [];
@@ -91,16 +98,16 @@ serve(async (req) => {
 
     for (const item of actionItems) {
       try {
-        // Map priority to Jira priority IDs (these are typically standard)
+        // Map priority to Jira priority names
         const priorityMap: Record<string, string> = {
-          High: "1",
-          Medium: "3",
-          Low: "5",
+          High: "High",
+          Medium: "Medium",
+          Low: "Low",
         };
 
         const issueData = {
           fields: {
-            project: { key: "PROJECT" }, // This would need to be configured per user
+            project: { key: projectKey },
             summary: item.summary,
             description: {
               type: "doc",
@@ -115,17 +122,16 @@ serve(async (req) => {
               ],
             },
             issuetype: { name: "Task" },
-            priority: { id: priorityMap[item.priority] || "3" },
             ...(item.dueDate && { duedate: item.dueDate.split("T")[0] }),
           },
         };
 
         const response = await fetch(
-          `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue`,
+          `${jiraBaseUrl}/rest/api/3/issue`,
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Basic ${auth}`,
               "Content-Type": "application/json",
               Accept: "application/json",
             },
