@@ -14,5 +14,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    // We are NOT adding a redirectTo here because we handle it 
+    // directly in your Auth.tsx file.
   }
 });
