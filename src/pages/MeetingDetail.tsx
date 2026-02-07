@@ -215,6 +215,7 @@ export default function MeetingDetail() {
               actionItems={actionItems}
               selectedItems={selectedItems}
               meetingTitle={meeting.title}
+              meetingId={meeting.id}
             />
           </div>
 

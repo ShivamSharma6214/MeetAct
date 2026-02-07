@@ -5,6 +5,46 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+interface JiraCredentials {
+  domain: string;
+  email: string;
+  apiToken: string;
+  projectKey: string;
+}
+
+const normalizeDomain = (value: string) =>
+  value
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\.atlassian\.net$/i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+
+const parseJiraCredentials = (integration: { access_token: string | null; cloud_id: string | null }): JiraCredentials | null => {
+  let parsed: Record<string, unknown> = {};
+
+  if (integration.access_token) {
+    try {
+      parsed = JSON.parse(integration.access_token);
+    } catch {
+      return null;
+    }
+  }
+
+  const domain = normalizeDomain(
+    typeof parsed.domain === "string" ? parsed.domain : (integration.cloud_id || "")
+  );
+  const email = typeof parsed.email === "string" ? parsed.email.trim().toLowerCase() : "";
+  const apiToken = typeof parsed.apiToken === "string" ? parsed.apiToken.trim() : "";
+  const projectKey = typeof parsed.projectKey === "string" ? parsed.projectKey.trim().toUpperCase() : "";
+
+  if (!domain || !email || !apiToken || !projectKey) {
+    return null;
+  }
+
+  return { domain, email, apiToken, projectKey };
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -48,12 +88,16 @@ serve(async (req) => {
 
     const { data: integration, error: integrationError } = await supabase
       .from("integrations")
-      .select("*")
+      .select("access_token, cloud_id")
       .eq("user_id", user.id)
       .eq("service", "jira")
-      .single();
+      .maybeSingle();
 
-    if (integrationError || !integration) {
+    if (integrationError) {
+      throw integrationError;
+    }
+
+    if (!integration) {
       return new Response(
         JSON.stringify({ 
           error: "Jira integration not found",
@@ -63,31 +107,18 @@ serve(async (req) => {
       );
     }
 
-    // Parse stored credentials
-    let credentials;
-    try {
-      credentials = JSON.parse(integration.access_token || "{}");
-    } catch {
+    const credentials = parseJiraCredentials(integration);
+    if (!credentials) {
       return new Response(
         JSON.stringify({ 
           error: "Invalid Jira configuration",
-          message: "Please reconnect your Jira account in Settings." 
+          message: "Please update your Jira settings with valid domain, email, API token, and project key." 
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const { domain, email, apiToken, projectKey } = credentials;
-
-    if (!domain || !email || !apiToken || !projectKey) {
-      return new Response(
-        JSON.stringify({ 
-          error: "Incomplete Jira configuration",
-          message: "Please update your Jira settings with all required fields." 
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     const auth = btoa(`${email}:${apiToken}`);
     const jiraBaseUrl = `https://${domain}.atlassian.net`;
@@ -105,10 +136,15 @@ serve(async (req) => {
           Low: "Low",
         };
 
+        const priorityName = priorityMap[item.priority] || "Medium";
+        const dueDate = typeof item.dueDate === "string" && item.dueDate
+          ? item.dueDate.split("T")[0]
+          : undefined;
+
         const issueData = {
           fields: {
             project: { key: projectKey },
-            summary: item.summary,
+            summary: item.summary || "MeetAct Action Item",
             description: {
               type: "doc",
               version: 1,
@@ -122,7 +158,8 @@ serve(async (req) => {
               ],
             },
             issuetype: { name: "Task" },
-            ...(item.dueDate && { duedate: item.dueDate.split("T")[0] }),
+            priority: { name: priorityName },
+            ...(dueDate && { duedate: dueDate }),
           },
         };
 

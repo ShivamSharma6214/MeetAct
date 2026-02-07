@@ -33,6 +33,14 @@ export default function Settings() {
   const [jiraApiToken, setJiraApiToken] = useState('');
   const [jiraProjectKey, setJiraProjectKey] = useState('');
 
+  const normalizeDomain = (value: string) =>
+    value
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\.atlassian\.net$/i, '')
+      .replace(/\/+$/, '')
+      .toLowerCase();
+
   useEffect(() => {
     if (!loading && !user) {
       navigate('/auth');
@@ -81,8 +89,13 @@ export default function Settings() {
 
   const connectJira = async () => {
     if (!user) return;
-    
-    if (!jiraDomain || !jiraEmail || !jiraApiToken || !jiraProjectKey) {
+
+    const normalizedDomain = normalizeDomain(jiraDomain);
+    const normalizedEmail = jiraEmail.trim().toLowerCase();
+    const normalizedToken = jiraApiToken.trim();
+    const normalizedProjectKey = jiraProjectKey.trim().toUpperCase();
+
+    if (!normalizedDomain || !normalizedEmail || !normalizedToken || !normalizedProjectKey) {
       toast({
         variant: 'destructive',
         title: 'Missing fields',
@@ -94,62 +107,39 @@ export default function Settings() {
     setIsConnectingJira(true);
 
     try {
-      // Validate the connection by making a test API call
-      const auth = btoa(`${jiraEmail}:${jiraApiToken}`);
-      const testResponse = await fetch(
-        `https://${jiraDomain}.atlassian.net/rest/api/3/myself`,
-        {
-          headers: {
-            'Authorization': `Basic ${auth}`,
-            'Accept': 'application/json',
-          },
-        }
-      );
-
-      if (!testResponse.ok) {
-        throw new Error('Failed to connect to Jira. Please check your credentials.');
-      }
-
-      // Store the credentials
       const credentials = JSON.stringify({
-        domain: jiraDomain,
-        email: jiraEmail,
-        apiToken: jiraApiToken,
-        projectKey: jiraProjectKey,
+        domain: normalizedDomain,
+        email: normalizedEmail,
+        apiToken: normalizedToken,
+        projectKey: normalizedProjectKey,
       });
 
-      if (jiraIntegration) {
-        // Update existing
-        const { error } = await supabase
-          .from('integrations')
-          .update({
-            access_token: credentials,
-            cloud_id: jiraDomain,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', jiraIntegration.id);
-
-        if (error) throw error;
-      } else {
-        // Create new
-        const { error } = await supabase
-          .from('integrations')
-          .insert({
+      const { data, error } = await supabase
+        .from('integrations')
+        .upsert(
+          {
             user_id: user.id,
             service: 'jira',
             access_token: credentials,
-            cloud_id: jiraDomain,
-          });
+            cloud_id: normalizedDomain,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id,service' }
+        )
+        .select('*')
+        .single();
 
-        if (error) throw error;
-      }
+      if (error) throw error;
+      setJiraIntegration(data);
+      setJiraDomain(normalizedDomain);
+      setJiraEmail(normalizedEmail);
+      setJiraProjectKey(normalizedProjectKey);
 
       toast({
         title: 'Jira connected!',
         description: 'You can now push action items to Jira.',
       });
 
-      fetchIntegrations();
       setJiraApiToken(''); // Clear the token from the form for security
     } catch (error) {
       console.error('Jira connection error:', error);

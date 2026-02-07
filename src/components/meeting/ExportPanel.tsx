@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -8,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
-import { Download, Send, FileJson, FileSpreadsheet, Loader2, Settings } from 'lucide-react';
+import { Download, Send, FileJson, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface ActionItem {
@@ -28,11 +27,12 @@ interface ExportPanelProps {
   actionItems: ActionItem[];
   selectedItems: string[];
   meetingTitle: string;
+  meetingId: string;
 }
 
-export function ExportPanel({ actionItems, selectedItems, meetingTitle }: ExportPanelProps) {
+export function ExportPanel({ actionItems, selectedItems, meetingTitle, meetingId }: ExportPanelProps) {
   const { toast } = useToast();
-  const [isPushingToJira, setIsPushingToJira] = useState(false);
+  const [isExportingToJira, setIsExportingToJira] = useState(false);
 
   const itemsToExport = selectedItems.length > 0
     ? actionItems.filter((item) => selectedItems.includes(item.id))
@@ -91,82 +91,53 @@ export function ExportPanel({ actionItems, selectedItems, meetingTitle }: Export
     });
   };
 
-  const pushToJira = async () => {
-    setIsPushingToJira(true);
+  const exportToJira = async () => {
+    setIsExportingToJira(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('push-to-jira', {
+      const { data, error } = await supabase.functions.invoke('transcribe-audio', {
         body: {
-          actionItems: itemsToExport.map((item) => ({
-            id: item.id,
-            summary: item.action_item,
-            description: item.notes || '',
-            assignee: item.owner_email,
-            dueDate: item.deadline,
-            priority: item.priority,
-          })),
+          projectKey: 'YOUR_PROJECT_KEY',
+          meetingId,
         },
       });
 
       if (error) throw error;
 
       if (data?.error) {
-        // Check if it's a "not connected" error
-        if (data.error === "Jira integration not found") {
-          toast({
-            variant: 'destructive',
-            title: 'Jira not connected',
-            description: (
-              <div className="flex flex-col gap-2">
-                <span>{data.message}</span>
-                <Link to="/settings" className="text-primary underline flex items-center gap-1">
-                  <Settings className="h-3 w-3" />
-                  Go to Settings
-                </Link>
-              </div>
-            ),
-          });
-        } else {
-          toast({
-            variant: 'destructive',
-            title: 'Jira push failed',
-            description: data.message || data.error,
-          });
-        }
+        toast({
+          variant: 'destructive',
+          title: 'Jira export failed',
+          description: data.message || data.error,
+        });
         return;
       }
 
       toast({
-        title: 'Pushed to Jira!',
-        description: `${data.created?.length || 0} issues created in Jira.`,
+        title: 'Exported to Jira!',
+        description: 'Tasks are being created in Jira.',
       });
     } catch (error) {
-      console.error('Jira push error:', error);
+      console.error('Jira export error:', error);
       toast({
         variant: 'destructive',
-        title: 'Jira push failed',
-        description: 'Please connect your Jira account in Settings.',
-        action: (
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/settings">Settings</Link>
-          </Button>
-        ),
+        title: 'Jira export failed',
+        description: error instanceof Error ? error.message : 'Failed to export tasks to Jira.',
       });
     } finally {
-      setIsPushingToJira(false);
+      setIsExportingToJira(false);
     }
   };
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button onClick={pushToJira} disabled={isPushingToJira || itemsToExport.length === 0}>
-        {isPushingToJira ? (
+      <Button onClick={exportToJira} disabled={isExportingToJira || itemsToExport.length === 0}>
+        {isExportingToJira ? (
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
         ) : (
           <Send className="mr-2 h-4 w-4" />
         )}
-        Push to Jira
-        {selectedItems.length > 0 && ` (${selectedItems.length})`}
+        {isExportingToJira ? 'Creating Jira Tasks...' : 'Export to Jira'}
       </Button>
 
       <DropdownMenu>

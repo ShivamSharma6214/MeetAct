@@ -12,6 +12,31 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const SESSION_CACHE_KEY = 'meetact.session.cache';
+
+const readCachedSession = (): Session | null => {
+  if (typeof window === 'undefined') return null;
+
+  const rawSession = localStorage.getItem(SESSION_CACHE_KEY);
+  if (!rawSession) return null;
+
+  try {
+    return JSON.parse(rawSession) as Session;
+  } catch {
+    localStorage.removeItem(SESSION_CACHE_KEY);
+    return null;
+  }
+};
+
+const writeCachedSession = (session: Session | null) => {
+  if (typeof window === 'undefined') return;
+
+  if (session) {
+    localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(session));
+  } else {
+    localStorage.removeItem(SESSION_CACHE_KEY);
+  }
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -19,23 +44,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
+    let isMounted = true;
+    const cachedSession = readCachedSession();
+
+    if (cachedSession) {
+      setSession(cachedSession);
+      setUser(cachedSession.user);
+    }
+
+    const applySession = (nextSession: Session | null) => {
+      if (!isMounted) return;
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+      writeCachedSession(nextSession);
+      setLoading(false);
+    };
+
+    // Set up auth state listener FIRST and keep localStorage in sync.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
+      (_event, nextSession) => {
+        applySession(nextSession);
       }
     );
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    // THEN check for existing session from Supabase and recover from cache if needed.
+    const initSession = async () => {
+      try {
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
 
-    return () => subscription.unsubscribe();
+        if (existingSession) {
+          applySession(existingSession);
+          return;
+        }
+
+        if (cachedSession?.access_token && cachedSession.refresh_token) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: cachedSession.access_token,
+            refresh_token: cachedSession.refresh_token,
+          });
+
+          if (!error && data.session) {
+            applySession(data.session);
+            return;
+          }
+        }
+
+        applySession(null);
+      } catch (error) {
+        console.error('Error restoring auth session:', error);
+        applySession(cachedSession ?? null);
+      }
+    };
+
+    void initSession();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, fullName?: string) => {
@@ -64,6 +130,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    writeCachedSession(null);
+    setSession(null);
+    setUser(null);
   };
 
   return (
