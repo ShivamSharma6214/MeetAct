@@ -99,24 +99,37 @@ export default function Auth() {
     }
   };
 
-  const handleGoogleSignIn = async () => {
+ const handleGoogleSignIn = async () => {
+  try {
     setIsLoading(true);
+    
+    // We define the redirect URL explicitly to avoid "ghost" redirects
+    const redirectUrl = `${window.location.origin}/dashboard`;
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: redirectUrl,
+        // Optional: forces the account picker to show every time for testing
+        queryParams: {
+          prompt: 'select_account',
+        },
       },
     });
-    setIsLoading(false);
 
-    if (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Google sign in failed',
-        description: error.message,
-      });
-    }
-  };
+    if (error) throw error;
+  } catch (error: any) {
+    toast({
+      variant: 'destructive',
+      title: 'Google sign in failed',
+      description: error.message || "An unexpected error occurred.",
+    });
+  } finally {
+    // Note: On success, the page redirects away, so this 
+    // only runs if the initial handshake fails.
+    setIsLoading(false);
+  }
+};
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
